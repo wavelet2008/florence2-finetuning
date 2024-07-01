@@ -127,3 +127,88 @@ class TheCauldronDataset(BaseDataset):
             image = image.convert("RGB")
 
         return question, answer, image
+
+
+
+class ObjectDetectionDataset(BaseDataset):
+    def __init__(self, split, processor, name="rishitdagli/cppe-5", class_list=["coverall", "face shield", "glove", "goggle", "mask"]):
+        self.task_prompt = "<OD>"
+        #self.img_paths = []
+        self.labels = []
+        with open('/data/pic/det/lig/tttrain.txt', 'r') as fd:
+            self.img_paths = fd.readlines()
+        random.shuffle(self.img_paths)
+
+    def read_annotations(self,annotation_path,width,height):
+        bboxes = []
+        categories = []
+        with open(annotation_path, 'r') as file:
+           for line in file:
+              parts = line.strip().split()
+              category = int(parts[0])
+              bbox = list(map(float, parts[1:]))
+            # Denormalize bbox
+              x_center = bbox[0] * width
+              y_center = bbox[1] * height
+              bbox_width = bbox[2] * width
+              bbox_height = bbox[3] * height
+              xmin = x_center - bbox_width / 2
+              ymin = y_center - bbox_height / 2
+              xmax = x_center + bbox_width / 2
+              ymax = y_center + bbox_height / 2
+              denormalized_bbox = [xmin, ymin, xmax, ymax]
+              categories.append(category)
+              bboxes.append(denormalized_bbox)
+        return bboxes, categories
+
+
+    def __getitem__(self, idx):
+        img_path = self.img_paths[idx]
+        img_path = img_path.replace('\n', '')
+        task = self.task_prompt
+
+        #if img_path.lower().endswith('.jpg'):
+    # 替换扩展名为'.txt'
+        img_txt = img_path[:-4] + '.txt'
+        image=Image.open(img_path)
+        width, height = image.size
+        #print(img_txt)   
+
+        bboxes,categories= self.read_annotations(img_txt,width,height)
+ width, height = image.size
+        bins_w, bins_h = [1000, 1000]  # Quantization bins.
+        size_per_bin_w = width / bins_w
+        size_per_bin_h = height / bins_h
+
+
+        bbox_str = ""
+        for (cat, bbox) in zip(categories, bboxes):
+            # if len(bbox_str) == 0:
+            bbox_str +="badlig" #self.class_list[cat]
+            #bbox_str += self.class_list[cat]
+            bbox = bbox.copy()
+
+            xmin, ymin, xmax, ymax = torch.tensor(bbox).split(1, dim=-1)
+
+            quantized_xmin = (
+                xmin / size_per_bin_w).floor().clamp(0, bins_w - 1)
+            quantized_ymin = (
+                ymin / size_per_bin_h).floor().clamp(0, bins_h - 1)
+            quantized_xmax = (
+                xmax / size_per_bin_w).floor().clamp(0, bins_w - 1)
+            quantized_ymax = (
+                ymax / size_per_bin_h).floor().clamp(0, bins_h - 1)
+
+            quantized_boxes = torch.cat(
+                (quantized_xmin, quantized_ymin, quantized_xmax, quantized_ymax), dim=-1
+            ).int()
+
+            bbox_str += str(f"<loc_{quantized_boxes[0]}><loc_{quantized_boxes[1]}><loc_{quantized_boxes[2]}><loc_{quantized_boxes[3]}>")
+
+            # bbox_formatted_list.append(bbox_str)
+         #   print(bbox_str)
+
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        return task, bbox_str, image
+
